@@ -1,3 +1,5 @@
+import time
+import uuid
 import requests
 import stripe
 import logging
@@ -11,16 +13,27 @@ stripeAPIKey = 'sk_test_51R48bmR0HkrpNQRbvqL3xnBi67yvT1lLuai7c58DWTnnyBi0KteOaSJ
 
 stripe.api_key = stripeAPIKey
 
+temp_account_store = {}
+
 app = Flask(__name__)
 
 @app.route('/connect-stripe')
 def connect_stripe():
     try:
+        session_id = str(uuid.uuid4())
+        temp_account_store[session_id] = {'status': 'pending'}
+        redirect_uri = "https://oneder-shift-backend.onrender.com/stripe/callback"
         logger.info("Redirecting user to Stripe OAuth URL for account connection.")
-        oauth_url = f"https://connect.stripe.com/oauth/authorize?response_type=code&client_id=ca_SpZoR8SvTHpmjox6os1OWQiERSqLScBb&scope=read_write"
-        
+        oauth_url = (
+                    f"https://connect.stripe.com/oauth/authorize?"
+                    f"response_type=code&"
+                    f"client_id=ca_SpZoR8SvTHpmjox6os1OWQiERSqLScBb&"
+                    f"scope=read_write&"
+                    f"redirect_uri={redirect_uri}"
+                )        
         logger.info(f"OAuth URL: {oauth_url}")
-        return jsonify({'url': oauth_url}), 200
+        return jsonify({'url': oauth_url, 'session_id': session_id}), 200
+
     except Exception as e:
         logger.error(f"Error occurred while generating Stripe OAuth URL: {str(e)}")
         return jsonify({'error': 'Failed to initiate Stripe connection'}), 500
@@ -28,7 +41,15 @@ def connect_stripe():
 @app.route('/stripe/callback')
 def stripe_callback():
     code = request.args.get('code')
+    session_id = request.args.get('session_id')
     
+    # Log the received code for debugging
+    logger.info("Received callback with code: %s", code)
+    
+    if not code:
+        logger.error("No 'code' parameter found in the request.")
+        return jsonify({'error': 'Missing code parameter'}), 400
+
     try:
         logger.info("Processing the Stripe OAuth callback with code: %s", code)
         token_url = "https://connect.stripe.com/oauth/token"
@@ -39,25 +60,33 @@ def stripe_callback():
             "grant_type": "authorization_code",
         }
 
+        logger.info("Sending request to Stripe token URL with data: %s", data)
+
         response = requests.post(token_url, data=data)
+        logger.info("Received response from Stripe: %s", response.text)
+
         if response.status_code == 200:
             access_token = response.json().get("access_token")
-            print("Access Token:", access_token)
+            logger.info("Access Token received: %s", access_token)
             
             # Corrected line to extract stripe_user_id
             connected_account_id = response.json().get('stripe_user_id')
-            
-            deep_link_url = f"onderShift://callback?connected_account_id={connected_account_id}"
+            if connected_account_id:
+                temp_account_store[session_id] = {
+                    'connected_account_id': connected_account_id,
+                    'timestamp': time.time()
+                }
+                logger.info("Successfully connected Stripe account: %s", connected_account_id)
+                return "Stripe connection successful! You can now return to your app."
 
-            logger.info("Successfully connected Stripe account: %s", connected_account_id)
-            
-            print(deep_link_url)
-            # Redirect to the deep link (Flutter app will handle this)
-            return redirect(deep_link_url)
+            else:
+                logger.error("No 'stripe_user_id' found in the response")
+                return "Stripe connection failed, please try again.", 400
 
         else:
-            print("Error:", response.json())
+            logger.error("Error response from Stripe: %s", response.json())
             return jsonify({'error': response.json()}), 400
+
     except stripe.error.StripeError as e:
         logger.error(f"Stripe API error: {str(e)}")
         return jsonify({'error': 'Stripe API error occurred'}), 400
@@ -83,6 +112,27 @@ def create_payment_intent(connected_account_id):
     except Exception as e:
         logger.error(f"General error during PaymentIntent creation: {str(e)}")
         return jsonify({'error': str(e)}), 400
+
+@app.route('/get-connected-id')
+def get_connected_id():
+    session_id = request.args.get('session_id')
+    
+    if not session_id or session_id not in temp_account_store:
+        logger.warning(f"Attempt to get connected ID for invalid session: {session_id}")
+        return jsonify({'error': 'Invalid or expired session.'}), 404
+    
+    account_data = temp_account_store[session_id]
+    
+    if 'connected_account_id' in account_data:
+        connected_id = account_data['connected_account_id']
+        logger.info(f"Successfully retrieved connected ID for session {session_id}")
+        
+        del temp_account_store[session_id]
+        
+        return jsonify({'connected_account_id': connected_id}), 200
+    else:
+        logger.warning(f"Connected ID not yet available for session {session_id}")
+        return jsonify({'error': 'Connected ID not yet available.'}), 404
 
 def capture_payment_and_transfer(payment_intent_id, connected_account_id):
     try:
