@@ -93,27 +93,35 @@ def stripe_callback():
     except Exception as e:
         logger.error(f"General error during Stripe callback processing: {str(e)}")
         return jsonify({'error': str(e)}), 400
-@app.route('/stripe/create-payment-intent/<string:connected_account_id>', methods=['POST'])
-def create_payment_intent(platform_onwer_account_id):
+@app.route('/stripe/create-payment-intent/<string:platform_owner_account_id>', methods=['POST'])
+def create_payment_intent(platform_owner_account_id):
     try:
-        logger.info("Creating PaymentIntent for connected account: %s", platform_onwer_account_id)
+        logger.info("Creating PaymentIntent for connected account: %s", platform_owner_account_id)
+        
+        # Corrected to use 'transfer_data' for specifying the destination
         payment_intent = stripe.PaymentIntent.create(
             amount=1000,
             currency='usd',
             transfer_group='pharmacy-payment',
-            destination=platform_onwer_account_id
+            transfer_data={
+                'destination': platform_owner_account_id  # Use transfer_data with destination
+            }
         )
+        
         logger.info("PaymentIntent created successfully: %s", payment_intent.id)
+        
         # Return the PaymentIntent details as a JSON response
         return jsonify({
-            "payment_intent_id": payment_intent.id
-            }), 200
+            "payment_intent_id": payment_intent.id,
+            "client_secret": payment_intent.client_secret  # Add client secret here
+        }), 200
     except stripe.error.StripeError as e:
         logger.error(f"Stripe API error during PaymentIntent creation: {str(e)}")
         return jsonify({'error': 'Stripe API error occurred'}), 400
     except Exception as e:
         logger.error(f"General error during PaymentIntent creation: {str(e)}")
         return jsonify({'error': str(e)}), 400
+
 
 @app.route('/get-connected-id')
 def get_connected_id():
@@ -163,6 +171,31 @@ def capture_payment_and_transfer(payment_intent_id, pharmacist_connected_account
     except Exception as e:
         logger.error(f"General error during captur or transfer: {str(e)}")
         return None
+@app.route('/confirm-payment', methods=['POST'])
+def confirm_payment():
+    try:
+        # Get PaymentMethod ID and PaymentIntent ID from the request
+        data = request.get_json()
+        payment_intent_id = data.get('payment_intent_id')  # PaymentIntent ID
+        payment_method_id = data.get('payment_method_id')  # PaymentMethod ID
 
+        # Confirm the PaymentIntent with the PaymentMethod ID
+        payment_intent = stripe.PaymentIntent.confirm(
+            payment_intent_id,  # The PaymentIntent ID
+            payment_method=payment_method_id  # The PaymentMethod ID from the client
+        )
+
+        # Check if the payment was successful
+        if payment_intent.status == 'succeeded':
+            return jsonify({"status": "success", "message": "Payment successful!"}), 200
+        else:
+            return jsonify({"status": "failed", "message": "Payment failed."}), 400
+
+    except stripe.error.StripeError as e:
+        # Handle Stripe API errors
+        return jsonify({'error': f"Stripe API error: {str(e)}"}), 400
+    except Exception as e:
+        # Handle other errors
+        return jsonify({'error': f"Error: {str(e)}"}), 400
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
