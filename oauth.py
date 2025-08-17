@@ -103,6 +103,7 @@ def create_payment_intent(platform_owner_account_id):
             amount=1000,
             currency='usd',
             transfer_group='pharmacy-payment',
+            on_behalf_of=platform_owner_account_id,
             transfer_data={
                 'destination': platform_owner_account_id  # Use transfer_data with destination
             }
