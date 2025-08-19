@@ -49,6 +49,7 @@ def stripe_callback():
     if not code:
         logger.error("No 'code' parameter found in the request.")
         return jsonify({'error': 'Missing code parameter'}), 400
+    
 
     try:
         logger.info("Processing the Stripe OAuth callback with code: %s", code)
