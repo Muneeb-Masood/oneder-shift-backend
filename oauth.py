@@ -37,6 +37,7 @@ def connect_stripe():
     except Exception as e:
         logger.error(f"Error occurred while generating Stripe OAuth URL: {str(e)}")
         return jsonify({'error': 'Failed to initiate Stripe connection'}), 500
+    
 
 @app.route('/stripe/callback')
 def stripe_callback():

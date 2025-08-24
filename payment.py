@@ -66,21 +66,28 @@ def transfer_funds():
         amount_to_transfer = amount - platform_fee  # Remaining amount for pharmacist
         
         # Transfer funds to the pharmacist's connected account
-        transfer = stripe.transfers.create(
+        transfer = stripe.Transfer.create(
             amount=amount_to_transfer,  # Amount to transfer (in cents)
             currency='usd',
             destination=connected_account_id,  # Pharmacist's connected account
+            transfer_group='shift-payment',  # Optional: helps in grouping payments
         )
         
+        # Return success response
         return jsonify({
+            'status': 'success',
             'transfer_id': transfer.id,
             'amount_transferred': amount_to_transfer
-        })
+        }), 200  # Success HTTP status code
 
     except stripe.error.StripeError as e:
-        return jsonify({'error': str(e)}), 400
+        # Handle Stripe-specific errors
+        return jsonify({'error': f"Stripe error: {str(e)}"}), 400
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # Handle any other unexpected errors
+        return jsonify({'error': f"Unexpected error: {str(e)}"}), 500
+
 
 # Endpoint to check the balance of the pharmacist's connected account
 @app.route('/check-balance/<connected_account_id>', methods=['GET'])
